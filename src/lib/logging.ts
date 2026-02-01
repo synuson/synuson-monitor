@@ -185,7 +185,7 @@ export const logger = {
   },
 
   /**
-   * 감사 로그 (항상 기록)
+   * 감사 로그 (항상 기록 + DB 저장)
    */
   audit(action: string, context?: LogContext): void {
     writeLog({
@@ -194,8 +194,39 @@ export const logger = {
       message: `[AUDIT] ${action}`,
       context,
     });
+
+    // DB에 비동기 저장 (실패해도 무시)
+    saveAuditLogToDb(action, context).catch(() => {
+      // DB 저장 실패 시 콘솔에만 에러 로깅
+      console.error('[AUDIT] Failed to save to database');
+    });
   },
 };
+
+/**
+ * 감사 로그 DB 저장 (비동기)
+ */
+async function saveAuditLogToDb(action: string, context?: LogContext): Promise<void> {
+  try {
+    // Dynamic import to avoid circular dependencies
+    const { prisma } = await import('@/lib/prisma');
+
+    await prisma.auditLog.create({
+      data: {
+        userId: context?.userId as string | undefined,
+        action,
+        target: context?.action as string | undefined,
+        details: context ? JSON.parse(JSON.stringify(context)) : undefined,
+        ipAddress: context?.ipAddress as string | undefined,
+        userAgent: context?.userAgent as string | undefined,
+        status: 'success',
+      },
+    });
+  } catch (error) {
+    // 무시 - console에 이미 로깅됨
+    void error;
+  }
+}
 
 /**
  * 요청별 로거 생성

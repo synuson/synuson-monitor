@@ -1,16 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getToken } from 'next-auth/jwt';
+import { decrypt } from '@/lib/encryption';
+import { prisma } from '@/lib/prisma';
+import { logger } from '@/lib/logging';
 
-// Note: Authentication is handled by client-side store for now
+/**
+ * POST /api/telegram/test - Send test message using stored credentials
+ */
 export async function POST(request: NextRequest) {
   try {
-    const { botToken, chatId } = await request.json();
+    const token = await getToken({ req: request });
 
-    if (!botToken || !chatId) {
+    if (!token?.sub) {
       return NextResponse.json(
-        { success: false, error: 'Bot token and chat ID are required' },
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
+    // Get settings from database
+    const userSettings = await prisma.userSettings.findUnique({
+      where: { userId: token.sub },
+    });
+
+    if (!userSettings?.telegramBotToken || !userSettings?.telegramChatId) {
+      return NextResponse.json(
+        { success: false, error: 'Telegram settings not configured' },
         { status: 400 }
       );
     }
+
+    // Decrypt the bot token
+    let botToken: string;
+    try {
+      botToken = decrypt(userSettings.telegramBotToken);
+    } catch {
+      return NextResponse.json(
+        { success: false, error: 'Failed to decrypt bot token' },
+        { status: 500 }
+      );
+    }
+
+    const chatId = userSettings.telegramChatId;
 
     const text = `✅ *SYNUSON Monitor Test*
 
@@ -37,15 +68,17 @@ Telegram 연동이 정상적으로 설정되었습니다.
     const data = await response.json();
 
     if (data.ok) {
+      logger.audit('TELEGRAM_TEST_SUCCESS', { userId: token.sub });
       return NextResponse.json({ success: true });
     } else {
+      logger.warn('Telegram test failed', { userId: token.sub, error: data.description });
       return NextResponse.json(
         { success: false, error: data.description || 'Failed to send message' },
         { status: 400 }
       );
     }
   } catch (error) {
-    console.error('Telegram test error:', error);
+    logger.error('Telegram test error', error);
     return NextResponse.json(
       { success: false, error: 'Failed to connect to Telegram API' },
       { status: 500 }

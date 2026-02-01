@@ -68,10 +68,16 @@ const PROTECTED_API_ROUTES = [
   '/api/telegram',
   '/api/users',
   '/api/settings',
+  '/api/anomaly',
+  '/api/cache',
+  '/api/problems',
+  '/api/maintenance',
+  '/api/audit-logs',
 ];
 
 const PUBLIC_ROUTES = [
   '/login',
+  '/privacy',
   '/api/auth',
   '/api/health',
   '/api/realtime',
