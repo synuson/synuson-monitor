@@ -1,0 +1,166 @@
+# SYNUSON Monitor - Zabbix 테스트 환경 (PostgreSQL + TimescaleDB)
+# 사용법: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # ============================================
+  # PostgreSQL + TimescaleDB 데이터베이스
+  # ============================================
+  postgres-server:
+    image: timescale/timescaledb:2.11.2-pg15
+    container_name: zabbix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_password
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "effective_cache_size=768MB"
+      - "-c"
+      - "maintenance_work_mem=128MB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "default_statistics_target=100"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "effective_io_concurrency=200"
+      - "-c"
+      - "min_wal_size=1GB"
+      - "-c"
+      - "max_wal_size=4GB"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - zabbix-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix -d zabbix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Zabbix Server (PostgreSQL)
+  # ============================================
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-6.4-latest
+    container_name: zabbix-server
+    restart: unless-stopped
+    environment:
+      DB_SERVER_HOST: postgres-server
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_password
+      ZBX_CACHESIZE: 128M
+      ZBX_HISTORYCACHESIZE: 64M
+      ZBX_HISTORYINDEXCACHESIZE: 16M
+      ZBX_TRENDCACHESIZE: 16M
+      ZBX_VALUECACHESIZE: 64M
+      # TimescaleDB 설정
+      ZBX_ENABLE_TIMESCALEDB: "true"
+    ports:
+      - "10051:10051"
+    volumes:
+      - zabbix-server-data:/var/lib/zabbix
+      - zabbix-snmptraps:/var/lib/zabbix/snmptraps
+      - ./alertscripts:/usr/lib/zabbix/alertscripts:ro
+      - ./externalscripts:/usr/lib/zabbix/externalscripts:ro
+    depends_on:
+      postgres-server:
+        condition: service_healthy
+    networks:
+      - zabbix-network
+
+  # ============================================
+  # Zabbix Web Interface (Nginx + PostgreSQL)
+  # ============================================
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-6.4-latest
+    container_name: zabbix-web
+    restart: unless-stopped
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      DB_SERVER_HOST: postgres-server
+      POSTGRES_DB: zabbix
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: zabbix_password
+      PHP_TZ: Asia/Seoul
+      ZBX_SERVER_NAME: "SYNUSON Test Environment"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - zabbix-server
+      - postgres-server
+    networks:
+      - zabbix-network
+
+  # ============================================
+  # Zabbix Agent (서버 자체 모니터링)
+  # ============================================
+  zabbix-agent:
+    image: zabbix/zabbix-agent:alpine-6.4-latest
+    container_name: zabbix-agent
+    restart: unless-stopped
+    environment:
+      ZBX_HOSTNAME: "Zabbix server"
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_PORT: 10051
+      ZBX_ACTIVE_ALLOW: "true"
+    ports:
+      - "10050:10050"
+    depends_on:
+      - zabbix-server
+    networks:
+      - zabbix-network
+    privileged: true
+
+  # ============================================
+  # Zabbix Agent 2 (추가 테스트용 - Docker 모니터링)
+  # ============================================
+  zabbix-agent2:
+    image: zabbix/zabbix-agent2:alpine-6.4-latest
+    container_name: zabbix-agent2
+    restart: unless-stopped
+    environment:
+      ZBX_HOSTNAME: "Docker Host"
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_PORT: 10051
+      ZBX_ACTIVE_ALLOW: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - zabbix-server
+    networks:
+      - zabbix-network
+    privileged: true
+
+# ============================================
+# 볼륨 정의
+# ============================================
+volumes:
+  postgres-data:
+    driver: local
+  zabbix-server-data:
+    driver: local
+  zabbix-snmptraps:
+    driver: local
+
+# ============================================
+# 네트워크 정의
+# ============================================
+networks:
+  zabbix-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

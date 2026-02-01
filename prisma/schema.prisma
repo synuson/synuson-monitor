@@ -1,0 +1,106 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 사용자 역할
+enum Role {
+  admin    // 전체 관리자 - 모든 권한
+  operator // 운영자 - 읽기/쓰기, 설정 변경 가능
+  viewer   // 조회자 - 읽기 전용
+}
+
+// 사용자
+model User {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  email         String?   @unique
+  passwordHash  String    @map("password_hash")
+  role          Role      @default(viewer)
+  isActive      Boolean   @default(true) @map("is_active")
+  lastLogin     DateTime? @map("last_login")
+  loginAttempts Int       @default(0) @map("login_attempts")
+  lockedUntil   DateTime? @map("locked_until")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  settings  UserSettings?
+  auditLogs AuditLog[]
+  sessions  Session[]
+
+  @@map("users")
+}
+
+// 사용자 설정
+model UserSettings {
+  id                   String   @id @default(cuid())
+  userId               String   @unique @map("user_id")
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 대시보드 설정
+  defaultHostGroup     String?  @map("default_host_group")
+  refreshInterval      Int      @default(30) @map("refresh_interval") // 초 단위
+  theme                String   @default("system") // light, dark, system
+  language             String   @default("ko") // ko, en, ja, zh
+
+  // 알림 설정
+  telegramBotToken     String?  @map("telegram_bot_token")
+  telegramChatId       String?  @map("telegram_chat_id")
+  notificationsEnabled Boolean  @default(false) @map("notifications_enabled")
+  notifySeverities     String[] @default([]) @map("notify_severities") // 알림 받을 심각도
+
+  // 기타 설정
+  settings             Json?    // 추가 설정용 JSON
+
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@map("user_settings")
+}
+
+// 세션 (NextAuth.js)
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("sessions")
+}
+
+// 감사 로그
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // login, logout, create_user, update_settings, etc.
+  target    String?  // 대상 리소스 (user:123, settings, etc.)
+  details   Json?    // 상세 정보
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  status    String   @default("success") // success, failure
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// 시스템 설정
+model SystemSettings {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}

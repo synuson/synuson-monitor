@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # SYNUSON Monitor Application
+  # ============================================
+  synuson-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synuson-monitor
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://synuson:${DB_PASSWORD}@postgres:5432/synuson
+      - ZABBIX_URL=${ZABBIX_URL}
+      - ZABBIX_API_TOKEN=${ZABBIX_API_TOKEN}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - NEXTAUTH_URL=${NEXTAUTH_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - synuson-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # PostgreSQL Database
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: synuson-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=synuson
+      - POSTGRES_USER=synuson
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - synuson-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synuson -d synuson"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================
+  # Nginx Reverse Proxy (Optional)
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: synuson-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - synuson-monitor
+    networks:
+      - synuson-network
+    profiles:
+      - with-nginx
+
+networks:
+  synuson-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
