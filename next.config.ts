@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 
+// Security headers (CSP is now set dynamically in middleware with nonce)
 const securityHeaders = [
   {
     key: 'X-DNS-Prefetch-Control',
@@ -29,22 +30,8 @@ const securityHeaders = [
     key: 'Permissions-Policy',
     value: 'camera=(), microphone=(), geolocation=()'
   },
-  {
-    key: 'Content-Security-Policy',
-    value: [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' data:",
-      "connect-src 'self' ws: wss:",
-      "frame-ancestors 'self'",
-      "form-action 'self'",
-      "base-uri 'self'",
-      "object-src 'none'",
-      "upgrade-insecure-requests",
-    ].join('; ')
-  }
+  // CSP is set dynamically in middleware with nonce support
+  // See: src/middleware.ts - getCSPHeader()
 ];
 
 const nextConfig: NextConfig = {

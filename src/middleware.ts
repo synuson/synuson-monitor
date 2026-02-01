@@ -73,6 +73,8 @@ const PROTECTED_API_ROUTES = [
   '/api/problems',
   '/api/maintenance',
   '/api/audit-logs',
+  '/api/realtime',
+  '/api/chat',
 ];
 
 const PUBLIC_ROUTES = [
@@ -80,7 +82,6 @@ const PUBLIC_ROUTES = [
   '/privacy',
   '/api/auth',
   '/api/health',
-  '/api/realtime',
 ];
 
 const AUTH_ROUTES = [
@@ -125,6 +126,60 @@ const SECURITY_HEADERS: Record<string, string> = {
 };
 
 // ============================================
+// CSP with Nonce Generation
+// ============================================
+function generateNonce(): string {
+  // Use Web Crypto API for Edge Runtime compatibility
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return btoa(String.fromCharCode(...array));
+}
+
+function getCSPHeader(nonce: string): string {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  // In production, use strict CSP with nonce
+  // In development, allow unsafe-inline for hot reload
+  const scriptSrc = isProduction
+    ? `'self' 'nonce-${nonce}' 'strict-dynamic'`
+    : `'self' 'unsafe-inline' 'unsafe-eval'`;
+
+  const styleSrc = isProduction
+    ? `'self' 'nonce-${nonce}'`
+    : `'self' 'unsafe-inline'`;
+
+  return [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    `style-src ${styleSrc}`,
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' ws: wss: https:",
+    "frame-ancestors 'self'",
+    "form-action 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+  ].join('; ');
+}
+
+// ============================================
+// Helper: Apply security headers to response
+// ============================================
+function applySecurityHeaders(response: NextResponse, nonce: string): void {
+  // Apply static security headers
+  Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
+    response.headers.set(key, value);
+  });
+
+  // Apply dynamic CSP with nonce
+  response.headers.set('Content-Security-Policy', getCSPHeader(nonce));
+
+  // Pass nonce to client for inline scripts (if needed)
+  response.headers.set('X-Nonce', nonce);
+}
+
+// ============================================
 // Middleware
 // ============================================
 export async function middleware(request: NextRequest) {
@@ -133,6 +188,9 @@ export async function middleware(request: NextRequest) {
   const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
                    request.headers.get('x-real-ip') ||
                    'unknown';
+
+  // Generate nonce for this request
+  const nonce = generateNonce();
 
   // 1. Handle CORS Preflight
   if (request.method === 'OPTIONS') {
@@ -155,12 +213,7 @@ export async function middleware(request: NextRequest) {
   // 3. Public routes - no auth required
   if (PUBLIC_ROUTES.some((route) => pathname.startsWith(route))) {
     const response = NextResponse.next();
-
-    // Apply security headers
-    Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
-
+    applySecurityHeaders(response, nonce);
     return response;
   }
 
@@ -236,10 +289,8 @@ export async function middleware(request: NextRequest) {
     response.headers.set('X-RateLimit-Limit', String(RATE_LIMIT_CONFIG.api.max));
     response.headers.set('X-RateLimit-Remaining', String(apiLimit.remaining));
 
-    // Security headers
-    Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
-      response.headers.set(key, value);
-    });
+    // Apply security headers with CSP
+    applySecurityHeaders(response, nonce);
 
     return response;
   }
@@ -262,11 +313,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  // Apply security headers
+  // Apply security headers with CSP
   const response = NextResponse.next();
-  Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
-    response.headers.set(key, value);
-  });
+  applySecurityHeaders(response, nonce);
 
   return response;
 }

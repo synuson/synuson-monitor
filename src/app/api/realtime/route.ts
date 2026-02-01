@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getToken } from 'next-auth/jwt';
 import { createZabbixClient } from '@/lib/zabbix/config';
 
 export const dynamic = 'force-dynamic';
 
 // Polling endpoint for real-time updates
-// Note: Authentication is handled by client-side store for now
-// TODO: Add server-side authentication when NextAuth session is properly integrated
+// Authentication is enforced by middleware, double-check here for safety
 export async function GET(request: NextRequest) {
+  // Verify authentication
+  const token = await getToken({ req: request });
+  if (!token) {
+    return NextResponse.json(
+      { success: false, error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+
   const client = createZabbixClient();
 
   try {
